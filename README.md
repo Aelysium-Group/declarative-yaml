@@ -14,6 +14,7 @@ implementation "group.aelysium:declarative-yaml:0.1.0"
 ```
 
 # ⚠️ Config print formatting is not currently finished! ⚠️
+Configs are functional and can generate perfectly fine. They just don't contain comments and have effectively zero formatting.
 
 ## Quick Intro
 To get started, use the DeclarativeYAML class.

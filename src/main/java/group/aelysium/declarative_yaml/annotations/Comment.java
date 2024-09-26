@@ -1,4 +1,4 @@
-package group.aelysium.declarative_yaml;
+package group.aelysium.declarative_yaml.annotations;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
