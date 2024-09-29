@@ -16,10 +16,4 @@ public @interface Config {
      * @return The path of this config.
      */
     String value();
-
-    /**
-     * The separator to use when separating entries.
-     * @return The entry separator.
-     */
-    String entrySeparator() default "\n\n";
 }

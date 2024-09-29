@@ -1,12 +1,13 @@
 package group.aelysium.declarative_yaml;
 
 import group.aelysium.declarative_yaml.annotations.*;
-import group.aelysium.declarative_yaml.modals.ConfigNode;
+import group.aelysium.declarative_yaml.lib.Printer;
+import group.aelysium.declarative_yaml.lib.YAMLNode;
 import io.leangen.geantyref.TypeToken;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.configurate.CommentedConfigurationNode;
-import org.spongepowered.configurate.ConfigurationOptions;
+import org.spongepowered.configurate.util.Strings;
 import org.spongepowered.configurate.yaml.YamlConfigurationLoader;
 
 import java.io.*;
@@ -14,6 +15,7 @@ import java.lang.reflect.*;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -50,33 +52,41 @@ public class DeclarativeYAML {
      * <h3>Comment Replacement</h3>
      * When adding comments using the {@link Comment} annotation, you can define targets as {some_key} which will be replaced when the config is generated.
      * <pre><code>{@code "This is an example comment with an inserted value that says: {say_something_here}" }</code></pre>
-     * To replace a target, you can define its name inside the commentReplacements parameter.
+     * To replace a target, you can define its name inside the commentReplacements parameter on {@link Printer}.
      * @param clazz The class definition of the config.
-     * @param commentReplacements A list of keys to replace with values for any comments that contain a target matching key.
-     * @param pathReplacements If the {@link Config#value()} has curly braces covered paths (i.e. "some/{dynamic}/path.yml", those will be replaced with the provided replacements.
+     * @param printer The printer configuration to use.
      * @throws IOException If the config filepath contains invalid characters.
      * @throws ArrayIndexOutOfBoundsException If you don't provide the same number of pathReplacements as {path_parameters} in the @Config path.
      */
-    public static <T> T load(@NotNull Class<T> clazz, @Nullable Map<String, String> commentReplacements, @Nullable Map<String, String> pathReplacements) throws IOException, ArrayIndexOutOfBoundsException {
-        if(!clazz.isAnnotationPresent(Config.class)) throw new RuntimeException("Configs must be annotated with @Config");
+    public static <T> T load(@NotNull Class<T> clazz, @NotNull Printer printer) throws IOException, ArrayIndexOutOfBoundsException {
+        printer.injecting(clazz.isAnnotationPresent(Inject.class));
 
-        Config config = clazz.getAnnotation(Config.class);
+        if(!(clazz.isAnnotationPresent(Config.class) || !printer.injecting()))
+            throw new RuntimeException("Config class declarations must be annotated with either @Config or @Inject.");
 
-        String path = parsePath(config.value(), pathReplacements);
+        String configPath;
+        {
+            if(printer.injecting()) configPath = clazz.getAnnotation(Inject.class).value();
+            else configPath = clazz.getAnnotation(Config.class).value();
+        }
+
+        String path = parsePath(configPath, printer);
         try {
             T instance = clazz.getConstructor().newInstance();
 
-            List<ConfigNode> nodes = generateEntries(clazz);
-            pathParameters(clazz, instance, pathReplacements == null ? Map.of() : pathReplacements);
+            pathParameters(clazz, instance, printer);
+
+            List<ConfigTarget> targets = generateConfigTargets(clazz, printer);
+            YAMLNode nodeTree = convertConfigTargetsToYAMLNodes(clazz, targets);
+
+            CommentedConfigurationNode yaml = loadOrGenerateFile(path, nodeTree, printer);
+
             handleAllContents(clazz, instance, path);
-
-            // Generates the config if it doesn't exist then loads the contents of the config.
-            CommentedConfigurationNode yaml = loadOrGenerateFile(path, nodes);
-
-            for (ConfigNode node : nodes) {
+            for (ConfigTarget node : targets) {
+                if(node.field() == null) continue;
                 Type type = node.field().getGenericType();
                 node.field().setAccessible(true);
-                node.field().set(instance, getValueFromNode(yaml, node.key(), TypeToken.get(type)));
+                node.field().set(instance, getValueFromYAML(yaml, node.key(), TypeToken.get(type)));
                 node.field().setAccessible(false);
             }
             return instance;
@@ -85,13 +95,12 @@ public class DeclarativeYAML {
         }
     }
 
-    protected static List<ConfigNode> generateEntries(@NotNull Class<?> clazz) {
-        Map<Integer, List<ConfigNode>> entries = new HashMap<>();
-        try {
-            Comment comment = clazz.getAnnotation(Comment.class);
-            enterValue(entries, new ConfigNode(Integer.MIN_VALUE, "", "", null, Arrays.asList(comment.value())));
-        } catch (Exception ignore) {}
+    public static <T> T load(@NotNull Class<T> clazz) throws IOException, ArrayIndexOutOfBoundsException {
+        return load(clazz, new Printer());
+    }
 
+    private static List<ConfigTarget> generateConfigTargets(@NotNull Class<?> clazz, Printer printer) {
+        Map<Integer, List<ConfigTarget>> toBeSorted = new HashMap<>();
         Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> !Modifier.isStatic(f.getModifiers())).toList()
                 .forEach(f -> {
@@ -104,24 +113,63 @@ public class DeclarativeYAML {
                     List<String> comment = null;
                     if(hasComment) {
                         Comment c = f.getAnnotation(Comment.class);
-                        comment = Arrays.asList(c.value());
+                        comment = new ArrayList<>();
+                        for (String s : c.value()) {
+                            AtomicReference<String> correctedString = new AtomicReference<>(s);
+                            printer.commentReplacements().forEach((k, v) -> correctedString.set(correctedString.get().replace("{"+k+"}", v)));
+                            comment.add(correctedString.get());
+                        }
                     }
 
-                    enterValue(entries, new ConfigNode(node.order(), node.key(), node.defaultValue(), f, comment));
+                    Object defaultValue = null;
+                    try {
+                        defaultValue = f.get(f.getType());
+                    } catch (Exception ignore) {}
+                    if(defaultValue == null) throw new NullPointerException("You must define a default value on entries annotated with @Node");
+                    toBeSorted.computeIfAbsent(node.value(), k -> new ArrayList<>()).add(new ConfigTarget(node.value(), node.key(), defaultValue, f, comment));
                 });
 
-        List<ConfigNode> sortedEntries = new ArrayList<>();
+        List<ConfigTarget> sorted = new ArrayList<>();
         {
-            List<Map.Entry<Integer, List<ConfigNode>>> list = new ArrayList<>(entries.entrySet());
+            List<Map.Entry<Integer, List<ConfigTarget>>> list = new ArrayList<>(toBeSorted.entrySet());
             list.sort((entry1, entry2) -> entry2.getKey().compareTo(entry1.getKey()));
 
-            list.forEach(entry -> sortedEntries.addAll(entry.getValue()));
+            list.forEach(entry -> sorted.addAll(entry.getValue()));
+            Collections.reverse(sorted);
         }
 
-        return sortedEntries;
+        return sorted;
     }
 
-    protected static void pathParameters(@NotNull Class<?> clazz, @NotNull Object instance, @NotNull Map<String, String> pathReplacements) {
+    private static YAMLNode convertConfigTargetsToYAMLNodes(@NotNull Class<?> clazz, List<ConfigTarget> targets) {
+        YAMLNode root;
+
+        try {
+            Comment comment = clazz.getAnnotation(Comment.class);
+            root = new YAMLNode("", Arrays.asList(comment.value()));
+        } catch (Exception ignore) {
+            root = new YAMLNode("", null);
+        }
+
+        for (ConfigTarget parsingTarget : targets) {
+            String[] keys = parsingTarget.key().split("\\.");
+            AtomicReference<YAMLNode> currentNode = new AtomicReference<>(root);
+            for (int i = 0; i < keys.length; i++) {
+                String key = keys[i];
+                boolean lastKey = i == keys.length - 1;
+
+                YAMLNode newCurrent = currentNode.get().setGetChild(
+                        key,
+                        lastKey ? new YAMLNode(key, parsingTarget.value(), parsingTarget.comment()) : new YAMLNode(key, null)
+                );
+                currentNode.set(newCurrent);
+            }
+        }
+
+        return root;
+    }
+
+    private static void pathParameters(@NotNull Class<?> clazz, @NotNull Object instance, @NotNull Printer printer) {
         Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> !Modifier.isStatic(f.getModifiers())).toList()
                 .forEach(f -> {
@@ -130,7 +178,7 @@ public class DeclarativeYAML {
                     PathParameter pathParameter = f.getAnnotation(PathParameter.class);
                     try {
                         f.setAccessible(true);
-                        f.set(instance, pathReplacements.get(pathParameter.value()));
+                        f.set(instance, printer.pathReplacements().get(pathParameter.value()));
                         f.setAccessible(false);
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -138,7 +186,7 @@ public class DeclarativeYAML {
                 });
     }
 
-    protected static void handleAllContents(@NotNull Class<?> clazz, @NotNull Object instance, @NotNull String path) throws Exception {
+    private static void handleAllContents(@NotNull Class<?> clazz, @NotNull Object instance, @NotNull String path) throws Exception {
         File configPointer = new File(path);
         byte[] allContents = Files.readAllBytes(configPointer.toPath());
 
@@ -167,7 +215,7 @@ public class DeclarativeYAML {
      * @return Data with a type matching `type`
      * @throws IllegalStateException If there was an issue while retrieving the data or converting it to `type`.
      */
-    protected static <T> T getValueFromNode(CommentedConfigurationNode data, String node, TypeToken<T> type) throws IllegalStateException {
+    private static <T> T getValueFromYAML(CommentedConfigurationNode data, String node, TypeToken<T> type) throws IllegalStateException {
         try {
             String[] steps = node.split("\\.");
 
@@ -185,31 +233,29 @@ public class DeclarativeYAML {
             throw new IllegalStateException("The node ["+node+"] is of the wrong data type! Make sure you are using the correct type of data!");
         } catch (Exception e) {
             throw new RuntimeException(e);
-            //throw new IllegalStateException("Unable to register the node: "+node);
         }
     }
 
-    protected static CommentedConfigurationNode loadOrGenerateFile(@NotNull String path, @NotNull List<ConfigNode> nodes) {
+    private static CommentedConfigurationNode loadOrGenerateFile(@NotNull String path, @NotNull YAMLNode nodeTree, Printer printer) {
         File configPointer = new File(path);
 
         try {
             if (!configPointer.exists()) {
+                if(printer.injecting()) throw new IOException("Attempted to inject into a config that doesn't exist! "+path);
+
                 File parent = configPointer.getParentFile();
                 if(parent != null) if (!parent.exists()) parent.mkdirs();
+                configPointer.createNewFile();
 
-                YamlConfigurationLoader loader = YamlConfigurationLoader.builder()
-                        .file(configPointer)
-                        .build();
-
-                CommentedConfigurationNode root = loader.load(ConfigurationOptions.defaults());
-
-                for (ConfigNode node : nodes) {
-                    if(node.comment() != null)
-                        root.node(Arrays.stream(node.key().split("\\.")).toList()).comment(String.join("\n", node.comment()));
-
-                    root.node(Arrays.stream(node.key().split("\\.")).toList()).set(node.value());
+                try(FileWriter writer = new FileWriter(configPointer)) {
+                    YAMLPrinter.format(writer, nodeTree, printer);
                 }
-                loader.save(root);
+            }
+
+            if(printer.injecting()) {
+                try(FileWriter writer = new FileWriter(configPointer)) {
+                    YAMLPrinter.format(writer, nodeTree, printer);
+                }
             }
 
             return YamlConfigurationLoader.builder()
@@ -221,11 +267,7 @@ public class DeclarativeYAML {
         }
     }
 
-    protected static void enterValue(Map<Integer, List<ConfigNode>> entries, ConfigNode entry) {
-        entries.computeIfAbsent(entry.order(), k -> new ArrayList<>()).add(entry);
-    }
-
-    protected static String parsePath(String originalPath, Map<String, String> pathReplacements) throws IOException {
+    private static String parsePath(String originalPath, Printer printer) throws IOException {
         String path;
         {
             AtomicInteger index = new AtomicInteger(0);
@@ -233,7 +275,7 @@ public class DeclarativeYAML {
                 if(!v.startsWith("{")) return v;
                 String key = v.replaceAll("^.*\\{([a-zA-Z0-9\\_\\-\\.\\/\\\\]+)\\}.*","$1");
 
-                String replacement = pathReplacements.get(key);
+                String replacement = printer.pathReplacements().get(key);
                 if(replacement == null) throw new IllegalArgumentException("No value for the path key '"+key+"' exists!");
                 index.incrementAndGet();
                 return v.replaceAll("^\\{[a-zA-Z0-9\\_\\-\\.\\/\\\\]+\\}(\\.[a-zA-Z0-9\\_\\-]*)?",replacement+"$1");
@@ -244,5 +286,51 @@ public class DeclarativeYAML {
             throw new IOException("Invalid file path defined for config: "+path);
 
         return path;
+    }
+}
+
+class YAMLPrinter {
+    public static void format(FileWriter writer, YAMLNode nodeTree, Printer printer) throws Exception {
+        nodeToYAML(writer, nodeTree, -1, printer);
+    }
+
+    private static void nodeToYAML(FileWriter writer, YAMLNode current, int level, Printer printer) throws Exception {
+        String indent = Strings.repeat(" ", level < 0 ? 0 : level * printer.indentSpaces());
+
+        if (current.children().isPresent()) {
+            if(level >= 0) writer.append(indent).append(current.name()).append(":\n");
+            for (YAMLNode node : current.children().orElseThrow())
+                nodeToYAML(writer, node, level + 1, printer);
+            return;
+        }
+
+        for (String s : current.comment().orElse(List.of())) {
+            if (printer.indentComments()) writer.append(indent);
+
+            System.out.println(s);
+            // Add comment hashtag if one wasn't given.
+            if(!s.startsWith("#")) writer.append("# ");
+
+            writer.append(s);
+            writer.append("\n");
+        }
+        if(!current.name().isEmpty())
+            writer.append(indent)
+                .append(current.name())
+                .append(": ")
+                .append(current.stringifiedValue().orElse(""))
+                .append("\n");
+
+        writer.append(printer.lineSeparator());
+    }
+}
+
+record ConfigTarget(int order, String key, Object value, Field field, List<String> comment) {
+    ConfigTarget(int order, @NotNull String key, @NotNull Object value, @Nullable Field field, @Nullable List<String> comment) {
+        this.order = order;
+        this.key = key;
+        this.value = value;
+        this.field = field;
+        this.comment = comment;
     }
 }

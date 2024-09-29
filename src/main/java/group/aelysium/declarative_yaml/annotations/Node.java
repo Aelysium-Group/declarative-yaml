@@ -14,25 +14,13 @@ import java.lang.annotation.Target;
 public @interface Node {
     /**
      * The order of this entry.
-     * This value manages how the elements will appear in the config.
+     * This value should be an index defining the descending order of how you want nodes printed to your file.
      */
-    int order() default 0;
+    int value() default 0;
 
     /**
      * The key to read.
+     * You can climb up the yaml hierarchy by separating your keys with periods.
      */
     String key();
-
-    /**
-     * The default value if the entry doesn't exist.
-     * The value will attempt to be parsed to other data types if it's supported.<br/>
-     * Supported values are:<br/>
-     * - 'boolean' = "true", "false"
-     * - 'int' = "1", "-230", etc.<br/>
-     * - 'long' = "1L", "-230L", etc.<br/>
-     * - `float` = "1.2", "-230.5", etc.<br/>
-     * - `empty array` = "[]"<br/>
-     * - `string` = If none of the above converts work, string is the default.
-     */
-    String defaultValue();
 }
