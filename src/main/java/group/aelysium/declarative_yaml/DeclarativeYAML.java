@@ -3,10 +3,11 @@ package group.aelysium.declarative_yaml;
 import group.aelysium.declarative_yaml.annotations.*;
 import group.aelysium.declarative_yaml.lib.Printer;
 import group.aelysium.declarative_yaml.lib.YAMLNode;
-import io.leangen.geantyref.TypeToken;
+import group.aelysium.declarative_yaml.lib.YAMLSerializable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.configurate.CommentedConfigurationNode;
+import org.spongepowered.configurate.serialize.SerializationException;
 import org.spongepowered.configurate.util.Strings;
 import org.spongepowered.configurate.yaml.YamlConfigurationLoader;
 
@@ -22,6 +23,25 @@ import java.util.regex.Pattern;
  * Used for declarative loading of a YAML configuration.
  */
 public class DeclarativeYAML {
+    private static String supportedMaps = String.join(", ", List.of(
+            "Map<String, Primitive>",
+            "Map<String, String>",
+            "Map<String, YAMLSerializable>"
+    ));
+    private static String supportedTypes = String.join(", ", List.of(
+            "Primitive",
+            "String",
+            "YAMLNode",
+            "YAMLSerializable",
+            "List<Primitive>",
+            "List<String>",
+            "List<YAMLSerializable",
+            "Set<Primitive>",
+            "Set<String>",
+            "Set<YAMLSerializable>",
+            supportedMaps
+    ));
+
     /**
      * Loads a configuration from a class definition.
      * <h3>Creating a Config</h3>
@@ -76,18 +96,17 @@ public class DeclarativeYAML {
 
             pathParameters(clazz, instance, printer);
 
-            List<ConfigTarget> targets = generateConfigTargets(clazz, printer);
+            List<ConfigTarget> targets = generateConfigTargets(clazz, instance, printer);
             YAMLNode nodeTree = convertConfigTargetsToYAMLNodes(clazz, targets);
 
             CommentedConfigurationNode yaml = loadOrGenerateFile(path, nodeTree, printer);
 
             handleAllContents(clazz, instance, path);
-            for (ConfigTarget node : targets) {
-                if(node.field() == null) continue;
-                Type type = node.field().getGenericType();
-                node.field().setAccessible(true);
-                node.field().set(instance, getValueFromYAML(yaml, node.key(), TypeToken.get(type)));
-                node.field().setAccessible(false);
+            for (ConfigTarget target : targets) {
+                if(target.field() == null) continue;
+                target.field().setAccessible(true);
+                target.field().set(instance, getValueFromYAML(yaml, target));
+                target.field().setAccessible(false);
             }
             return instance;
         } catch (Exception e) {
@@ -99,8 +118,8 @@ public class DeclarativeYAML {
         return load(clazz, new Printer());
     }
 
-    private static List<ConfigTarget> generateConfigTargets(@NotNull Class<?> clazz, Printer printer) {
-        Map<Integer, List<ConfigTarget>> toBeSorted = new HashMap<>();
+    private static List<ConfigTarget> generateConfigTargets(@NotNull Class<?> clazz, @NotNull Object instance, Printer printer) {
+        List<ConfigTarget> targets = new ArrayList<>();
         Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> !Modifier.isStatic(f.getModifiers())).toList()
                 .forEach(f -> {
@@ -121,24 +140,26 @@ public class DeclarativeYAML {
                         }
                     }
 
+                    String key = node.key();
+                    if(key.isEmpty()) key = String.join(".", Arrays.stream(f.getName().split("_")).map(s -> s.replaceAll("([a-z])([A-Z]+)", "$1-$2").toLowerCase()).toList());
+
                     Object defaultValue = null;
                     try {
-                        defaultValue = f.get(f.getType());
+                        f.setAccessible(true);
+                        defaultValue = f.get(instance);
+                        f.setAccessible(false);
                     } catch (Exception ignore) {}
-                    if(defaultValue == null) throw new NullPointerException("You must define a default value on entries annotated with @Node");
-                    toBeSorted.computeIfAbsent(node.value(), k -> new ArrayList<>()).add(new ConfigTarget(node.value(), node.key(), defaultValue, f, comment));
+                    if(defaultValue == null) throw new NullPointerException("You must define a default value on fields annotated with @Node. Issue was caused by "+ f.getName());
+                    targets.add(new ConfigTarget(node.value(), key, defaultValue, f, comment));
                 });
 
-        List<ConfigTarget> sorted = new ArrayList<>();
-        {
-            List<Map.Entry<Integer, List<ConfigTarget>>> list = new ArrayList<>(toBeSorted.entrySet());
-            list.sort((entry1, entry2) -> entry2.getKey().compareTo(entry1.getKey()));
+        targets.sort((target1, target2) -> {
+            int compare = Integer.compare(target1.order(), target2.order());
+            if (compare == 0) return target1.key().compareTo(target2.key());
+            return compare;
+        });
 
-            list.forEach(entry -> sorted.addAll(entry.getValue()));
-            Collections.reverse(sorted);
-        }
-
-        return sorted;
+        return targets;
     }
 
     private static YAMLNode convertConfigTargetsToYAMLNodes(@NotNull Class<?> clazz, List<ConfigTarget> targets) {
@@ -210,27 +231,110 @@ public class DeclarativeYAML {
     /**
      * Retrieve data from a specific configuration node.
      * @param data The configuration data to search for a specific node.
-     * @param node The node to search for.
-     * @param type The type to convert the retrieved data to.
+     * @param target The target to search for.
      * @return Data with a type matching `type`
      * @throws IllegalStateException If there was an issue while retrieving the data or converting it to `type`.
      */
-    private static <T> T getValueFromYAML(CommentedConfigurationNode data, String node, TypeToken<T> type) throws IllegalStateException {
+    private static Object getValueFromYAML(CommentedConfigurationNode data, ConfigTarget target) throws IllegalStateException {
         try {
-            String[] steps = node.split("\\.");
+            String[] steps = target.key().split("\\.");
 
-            final CommentedConfigurationNode[] currentNode = {data};
-            Arrays.stream(steps).forEach(step -> {
-                currentNode[0] = currentNode[0].node(step);
-            });
+            AtomicReference<CommentedConfigurationNode> currentNode = new AtomicReference<>(data);
+            Arrays.stream(steps).forEach(step -> currentNode.set(currentNode.get().node(step)));
+            if(currentNode.get() == null) throw new NullPointerException("The node "+target.key()+" is null.");
 
-            if(currentNode[0] == null) throw new NullPointerException();
+            Class<?> clazz = target.field().getType();
 
-            return currentNode[0].get(type);
-        } catch (NullPointerException e) {
-            throw new IllegalStateException("The node ["+node+"] doesn't exist!");
-        } catch (ClassCastException e) {
-            throw new IllegalStateException("The node ["+node+"] is of the wrong data type! Make sure you are using the correct type of data!");
+            if(clazz.isPrimitive()) return currentNode.get().get(clazz);
+            if(String.class.isAssignableFrom(clazz)) return currentNode.get().get(clazz);
+            if(List.class.isAssignableFrom(clazz)) {
+                ParameterizedType type = (ParameterizedType) target.field().getGenericType();
+                Class<?> entryType = (Class<?>) type.getActualTypeArguments()[0];
+                if(!(entryType.isPrimitive() || String.class.isAssignableFrom(entryType) || YAMLSerializable.class.isAssignableFrom(entryType)))
+                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
+
+                List<Object> list = new ArrayList<>();
+
+                if(!currentNode.get().isList()) throw new IllegalArgumentException("The node "+target.key()+" is attempting to be read in a way that's not allowed. The caller is expecting it to be a List but it's not!");
+                currentNode.get().childrenList().forEach(entry -> {
+                    if(entryType.isPrimitive() || String.class.isAssignableFrom(entryType)) {
+                        try {
+                            list.add(entry.get(entryType));
+                        } catch (SerializationException e) {
+                            throw new IllegalArgumentException("A List<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a value was provided which is of a different type!");
+                        }
+                        return;
+                    }
+
+                    try {
+                        list.add(entryType.getConstructor(CommentedConfigurationNode.class).newInstance(entry));
+                    } catch (Exception e) {
+                        throw new RuntimeException("A List<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a fatal error has prevented a new instance of "+entryType.getSimpleName()+" from being generated.");
+                    }
+                });
+                return list;
+            }
+            if(Set.class.isAssignableFrom(clazz)) {
+                ParameterizedType type = (ParameterizedType) target.field().getGenericType();
+                Class<?> entryType = (Class<?>) type.getActualTypeArguments()[0];
+                if(!(entryType.isPrimitive() || String.class.isAssignableFrom(entryType) || YAMLSerializable.class.isAssignableFrom(entryType)))
+                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
+
+                Set<Object> set = new HashSet<>();
+
+                if(!currentNode.get().isList()) throw new IllegalArgumentException("The node "+target.key()+" is attempting to be read in a way that's not allowed. The caller is expecting it to be a Set but it's not!");
+                currentNode.get().childrenList().forEach(entry -> {
+                    if(entryType.isPrimitive() || String.class.isAssignableFrom(entryType)) {
+                        try {
+                            set.add(entry.get(entryType));
+                        } catch (SerializationException e) {
+                            throw new IllegalArgumentException("A Set<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a value was provided which is of a different type!");
+                        }
+                        return;
+                    }
+
+                    try {
+                        set.add(entryType.getConstructor(CommentedConfigurationNode.class).newInstance(entry));
+                    } catch (Exception e) {
+                        throw new RuntimeException("A Set<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a fatal error has prevented a new instance of "+entryType.getSimpleName()+" from being generated.");
+                    }
+                });
+                return set;
+            }
+            if(Map.class.isAssignableFrom(clazz)) {
+                ParameterizedType type = (ParameterizedType) target.field().getGenericType();
+                Class<?> keyType = (Class<?>) type.getActualTypeArguments()[0];
+                Class<?> valueType = (Class<?>) type.getActualTypeArguments()[1];
+                if(!(String.class.isAssignableFrom(keyType)))
+                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
+                if(!(valueType.isPrimitive() || String.class.isAssignableFrom(valueType) || YAMLSerializable.class.isAssignableFrom(valueType)))
+                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
+
+                Map<String, Object> map = new HashMap<>();
+
+                if(!currentNode.get().isMap()) throw new IllegalArgumentException("The node "+target.key()+" is attempting to be read in a way that's not allowed. The caller is expecting it to be a Map but it's not!");
+                currentNode.get().childrenMap().forEach((k, v) -> {
+                    if(!(k instanceof String key)) throw new IllegalArgumentException("Declarative YAML requires that maps loaded from YAML must be of the type ["+supportedMaps+"]. The node "+target.key()+" has a key which is of type "+k.getClass().getSimpleName()+" map keys must be strings!");
+                    if(valueType.isPrimitive() || String.class.isAssignableFrom(valueType)) {
+                        try {
+                            map.put(key, v.get(valueType));
+                        } catch (SerializationException e) {
+                            throw new IllegalArgumentException("A Map<String, "+valueType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a value was provided which is of a different type!");
+                        }
+                        return;
+                    }
+
+                    try {
+                        map.put(key, valueType.getConstructor(CommentedConfigurationNode.class).newInstance(v));
+                    } catch (Exception e) {
+                        throw new RuntimeException("A Map<String, "+valueType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a fatal error has prevented a new instance of "+valueType.getSimpleName()+" from being generated.");
+                    }
+                });
+
+                return map;
+            }
+
+            throw new RuntimeException(clazz.getSimpleName()+" is not a type that's supported by Declarative YAML. Supported types are: "+supportedTypes);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -307,7 +411,6 @@ class YAMLPrinter {
         for (String s : current.comment().orElse(List.of())) {
             if (printer.indentComments()) writer.append(indent);
 
-            System.out.println(s);
             // Add comment hashtag if one wasn't given.
             if(!s.startsWith("#")) writer.append("# ");
 

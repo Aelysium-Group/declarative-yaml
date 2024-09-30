@@ -1,5 +1,7 @@
 package group.aelysium.declarative_yaml.lib;
 
+import group.aelysium.declarative_yaml.annotations.Node;
+
 import java.util.HashMap;
 import java.util.Map;
 
