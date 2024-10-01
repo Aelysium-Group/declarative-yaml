@@ -12,15 +12,16 @@ public class YAMLNode {
     private final Object value;
     private final List<YAMLNode> children;
     private List<String> comment;
+    private boolean array = false;
 
-    public YAMLNode(@NotNull String name, @Nullable Object value, @Nullable List<String> comment) {
+    public YAMLNode(@Nullable String name, @Nullable Object value, @Nullable List<String> comment) {
         this.name = name;
         this.value = value;
         this.children = null;
         this.comment = comment;
     }
 
-    public YAMLNode(@NotNull String name, @Nullable List<String> comment) {
+    public YAMLNode(@Nullable String name, @Nullable List<String> comment) {
         this.name = name;
         this.value = null;
         this.children = new ArrayList<>();
@@ -29,6 +30,12 @@ public class YAMLNode {
 
     public String name() {
         return this.name;
+    }
+    public void isArray(boolean isArray) {
+        this.array = isArray;
+    }
+    public boolean isArray() {
+        return this.array;
     }
 
     public Optional<Object> value() {

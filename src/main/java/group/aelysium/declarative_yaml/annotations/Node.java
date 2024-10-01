@@ -5,12 +5,12 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.FIELD)
 /**
  * Programmatically pulls data from the {@link Config} and stores it in the associated field.
  * The whatever that type of data is will be inferred from the field type.
  */
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.FIELD)
 public @interface Node {
     /**
      * The order of this entry.

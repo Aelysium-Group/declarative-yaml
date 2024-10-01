@@ -1,13 +1,14 @@
 package group.aelysium.declarative_yaml;
 
 import group.aelysium.declarative_yaml.annotations.*;
+import group.aelysium.declarative_yaml.lib.Primitives;
 import group.aelysium.declarative_yaml.lib.Printer;
+import group.aelysium.declarative_yaml.lib.Serializable;
 import group.aelysium.declarative_yaml.lib.YAMLNode;
-import group.aelysium.declarative_yaml.lib.YAMLSerializable;
+import io.leangen.geantyref.TypeVariableImpl;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.configurate.CommentedConfigurationNode;
-import org.spongepowered.configurate.serialize.SerializationException;
 import org.spongepowered.configurate.util.Strings;
 import org.spongepowered.configurate.yaml.YamlConfigurationLoader;
 
@@ -23,24 +24,6 @@ import java.util.regex.Pattern;
  * Used for declarative loading of a YAML configuration.
  */
 public class DeclarativeYAML {
-    private static String supportedMaps = String.join(", ", List.of(
-            "Map<String, Primitive>",
-            "Map<String, String>",
-            "Map<String, YAMLSerializable>"
-    ));
-    private static String supportedTypes = String.join(", ", List.of(
-            "Primitive",
-            "String",
-            "YAMLNode",
-            "YAMLSerializable",
-            "List<Primitive>",
-            "List<String>",
-            "List<YAMLSerializable",
-            "Set<Primitive>",
-            "Set<String>",
-            "Set<YAMLSerializable>",
-            supportedMaps
-    ));
 
     /**
      * Loads a configuration from a class definition.
@@ -53,7 +36,8 @@ public class DeclarativeYAML {
      * If a Comment is present, the comment will always be printed first.
      * <h3>Entry Serialization</h3>
      * When a member is annotated with {@link Node} the value of that entry in the config will be loaded into that member.
-     * The value itself will be serialized using {@link TypeToken} into whatever the member is.
+     * The type itself can be Primitive, {@link Serializable}, String.
+     * Additionally, you can also specify one of: List(?), Set(?), Map(String, ?). Where the question marks represent one of the already mentioned types.
      * <h3>Configuration Injection</h3>
      * Declarative YAML supports config injection. What this means is that, two config classes can point to the same config.
      * If they have differing entries, those entries will be injected into the correct location in the config, and will also be loaded as such.
@@ -141,7 +125,7 @@ public class DeclarativeYAML {
                     }
 
                     String key = node.key();
-                    if(key.isEmpty()) key = String.join(".", Arrays.stream(f.getName().split("_")).map(s -> s.replaceAll("([a-z])([A-Z]+)", "$1-$2").toLowerCase()).toList());
+                    if(key.isEmpty()) key = FieldAssigner.convertFieldNameToYAMLKey(f);
 
                     Object defaultValue = null;
                     try {
@@ -167,9 +151,9 @@ public class DeclarativeYAML {
 
         try {
             Comment comment = clazz.getAnnotation(Comment.class);
-            root = new YAMLNode("", Arrays.asList(comment.value()));
+            root = new YAMLNode(null, Arrays.asList(comment.value()));
         } catch (Exception ignore) {
-            root = new YAMLNode("", null);
+            root = new YAMLNode(null, null);
         }
 
         for (ConfigTarget parsingTarget : targets) {
@@ -181,8 +165,12 @@ public class DeclarativeYAML {
 
                 YAMLNode newCurrent = currentNode.get().setGetChild(
                         key,
-                        lastKey ? new YAMLNode(key, parsingTarget.value(), parsingTarget.comment()) : new YAMLNode(key, null)
+                        lastKey ? new YAMLNode(key, parsingTarget.value(), parsingTarget.comment())
+                        : new YAMLNode(key, null)
                 );
+                if(Set.class.isAssignableFrom(parsingTarget.value().getClass())) newCurrent.isArray(true);
+                if(List.class.isAssignableFrom(parsingTarget.value().getClass())) newCurrent.isArray(true);
+
                 currentNode.set(newCurrent);
             }
         }
@@ -230,114 +218,24 @@ public class DeclarativeYAML {
 
     /**
      * Retrieve data from a specific configuration node.
-     * @param data The configuration data to search for a specific node.
      * @param target The target to search for.
      * @return Data with a type matching `type`
      * @throws IllegalStateException If there was an issue while retrieving the data or converting it to `type`.
      */
-    private static Object getValueFromYAML(CommentedConfigurationNode data, ConfigTarget target) throws IllegalStateException {
-        try {
-            String[] steps = target.key().split("\\.");
+    private static Object getValueFromYAML(CommentedConfigurationNode root, ConfigTarget target) throws Exception {
+        CommentedConfigurationNode node = getNodeFromYAML(root, target.key());
 
-            AtomicReference<CommentedConfigurationNode> currentNode = new AtomicReference<>(data);
-            Arrays.stream(steps).forEach(step -> currentNode.set(currentNode.get().node(step)));
-            if(currentNode.get() == null) throw new NullPointerException("The node "+target.key()+" is null.");
+        return FieldAssigner.serialize(node, target.field().getType(), target.field().getGenericType());
+    }
 
-            Class<?> clazz = target.field().getType();
+    public static CommentedConfigurationNode getNodeFromYAML(CommentedConfigurationNode node, String route) throws Exception {
+        String[] steps = route.split("\\.");
 
-            if(clazz.isPrimitive()) return currentNode.get().get(clazz);
-            if(String.class.isAssignableFrom(clazz)) return currentNode.get().get(clazz);
-            if(List.class.isAssignableFrom(clazz)) {
-                ParameterizedType type = (ParameterizedType) target.field().getGenericType();
-                Class<?> entryType = (Class<?>) type.getActualTypeArguments()[0];
-                if(!(entryType.isPrimitive() || String.class.isAssignableFrom(entryType) || YAMLSerializable.class.isAssignableFrom(entryType)))
-                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
+        AtomicReference<CommentedConfigurationNode> currentNode = new AtomicReference<>(node);
+        Arrays.stream(steps).forEach(step -> currentNode.set(currentNode.get().node(step)));
+        if (currentNode.get() == null) throw new NullPointerException("The node " + route + " is null.");
 
-                List<Object> list = new ArrayList<>();
-
-                if(!currentNode.get().isList()) throw new IllegalArgumentException("The node "+target.key()+" is attempting to be read in a way that's not allowed. The caller is expecting it to be a List but it's not!");
-                currentNode.get().childrenList().forEach(entry -> {
-                    if(entryType.isPrimitive() || String.class.isAssignableFrom(entryType)) {
-                        try {
-                            list.add(entry.get(entryType));
-                        } catch (SerializationException e) {
-                            throw new IllegalArgumentException("A List<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a value was provided which is of a different type!");
-                        }
-                        return;
-                    }
-
-                    try {
-                        list.add(entryType.getConstructor(CommentedConfigurationNode.class).newInstance(entry));
-                    } catch (Exception e) {
-                        throw new RuntimeException("A List<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a fatal error has prevented a new instance of "+entryType.getSimpleName()+" from being generated.");
-                    }
-                });
-                return list;
-            }
-            if(Set.class.isAssignableFrom(clazz)) {
-                ParameterizedType type = (ParameterizedType) target.field().getGenericType();
-                Class<?> entryType = (Class<?>) type.getActualTypeArguments()[0];
-                if(!(entryType.isPrimitive() || String.class.isAssignableFrom(entryType) || YAMLSerializable.class.isAssignableFrom(entryType)))
-                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
-
-                Set<Object> set = new HashSet<>();
-
-                if(!currentNode.get().isList()) throw new IllegalArgumentException("The node "+target.key()+" is attempting to be read in a way that's not allowed. The caller is expecting it to be a Set but it's not!");
-                currentNode.get().childrenList().forEach(entry -> {
-                    if(entryType.isPrimitive() || String.class.isAssignableFrom(entryType)) {
-                        try {
-                            set.add(entry.get(entryType));
-                        } catch (SerializationException e) {
-                            throw new IllegalArgumentException("A Set<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a value was provided which is of a different type!");
-                        }
-                        return;
-                    }
-
-                    try {
-                        set.add(entryType.getConstructor(CommentedConfigurationNode.class).newInstance(entry));
-                    } catch (Exception e) {
-                        throw new RuntimeException("A Set<"+entryType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a fatal error has prevented a new instance of "+entryType.getSimpleName()+" from being generated.");
-                    }
-                });
-                return set;
-            }
-            if(Map.class.isAssignableFrom(clazz)) {
-                ParameterizedType type = (ParameterizedType) target.field().getGenericType();
-                Class<?> keyType = (Class<?>) type.getActualTypeArguments()[0];
-                Class<?> valueType = (Class<?>) type.getActualTypeArguments()[1];
-                if(!(String.class.isAssignableFrom(keyType)))
-                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
-                if(!(valueType.isPrimitive() || String.class.isAssignableFrom(valueType) || YAMLSerializable.class.isAssignableFrom(valueType)))
-                    throw new ClassCastException(target.key()+" is attempting to be assigned to "+clazz.getSimpleName()+" which isn't a supported type in Declarative YAML. The supported types are: "+supportedTypes);
-
-                Map<String, Object> map = new HashMap<>();
-
-                if(!currentNode.get().isMap()) throw new IllegalArgumentException("The node "+target.key()+" is attempting to be read in a way that's not allowed. The caller is expecting it to be a Map but it's not!");
-                currentNode.get().childrenMap().forEach((k, v) -> {
-                    if(!(k instanceof String key)) throw new IllegalArgumentException("Declarative YAML requires that maps loaded from YAML must be of the type ["+supportedMaps+"]. The node "+target.key()+" has a key which is of type "+k.getClass().getSimpleName()+" map keys must be strings!");
-                    if(valueType.isPrimitive() || String.class.isAssignableFrom(valueType)) {
-                        try {
-                            map.put(key, v.get(valueType));
-                        } catch (SerializationException e) {
-                            throw new IllegalArgumentException("A Map<String, "+valueType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a value was provided which is of a different type!");
-                        }
-                        return;
-                    }
-
-                    try {
-                        map.put(key, valueType.getConstructor(CommentedConfigurationNode.class).newInstance(v));
-                    } catch (Exception e) {
-                        throw new RuntimeException("A Map<String, "+valueType.getSimpleName()+"> was declared as the type for "+target.key()+". However, a fatal error has prevented a new instance of "+valueType.getSimpleName()+" from being generated.");
-                    }
-                });
-
-                return map;
-            }
-
-            throw new RuntimeException(clazz.getSimpleName()+" is not a type that's supported by Declarative YAML. Supported types are: "+supportedTypes);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return currentNode.get();
     }
 
     private static CommentedConfigurationNode loadOrGenerateFile(@NotNull String path, @NotNull YAMLNode nodeTree, Printer printer) {
@@ -352,13 +250,13 @@ public class DeclarativeYAML {
                 configPointer.createNewFile();
 
                 try(FileWriter writer = new FileWriter(configPointer)) {
-                    YAMLPrinter.format(writer, nodeTree, printer);
+                    YAMLPrinter.deserialize(writer, nodeTree, printer);
                 }
             }
 
             if(printer.injecting()) {
                 try(FileWriter writer = new FileWriter(configPointer)) {
-                    YAMLPrinter.format(writer, nodeTree, printer);
+                    YAMLPrinter.deserialize(writer, nodeTree, printer);
                 }
             }
 
@@ -394,20 +292,28 @@ public class DeclarativeYAML {
 }
 
 class YAMLPrinter {
-    public static void format(FileWriter writer, YAMLNode nodeTree, Printer printer) throws Exception {
-        nodeToYAML(writer, nodeTree, -1, printer);
+    public static void deserialize(FileWriter writer, YAMLNode nodeTree, Printer printer) throws Exception {
+        nodeToString(writer, nodeTree, 0, printer);
     }
 
-    private static void nodeToYAML(FileWriter writer, YAMLNode current, int level, Printer printer) throws Exception {
-        String indent = Strings.repeat(" ", level < 0 ? 0 : level * printer.indentSpaces());
+    public static void nodeToString(FileWriter writer, YAMLNode current, int level, Printer printer) throws Exception {
+        String indent = Strings.repeat(" ", level * printer.indentSpaces());
 
+        // Climb hierarchy
         if (current.children().isPresent()) {
-            if(level >= 0) writer.append(indent).append(current.name()).append(":\n");
+            if(current.name() == null) {
+                for (YAMLNode node : current.children().orElseThrow())
+                    nodeToString(writer, node, level, printer);
+                return;
+            }
+
+            writer.append(indent).append(current.name()).append(":\n");
             for (YAMLNode node : current.children().orElseThrow())
-                nodeToYAML(writer, node, level + 1, printer);
+                nodeToString(writer, node, level + 1, printer);
             return;
         }
 
+        // Print comments
         for (String s : current.comment().orElse(List.of())) {
             if (printer.indentComments()) writer.append(indent);
 
@@ -417,14 +323,93 @@ class YAMLPrinter {
             writer.append(s);
             writer.append("\n");
         }
-        if(!current.name().isEmpty())
-            writer.append(indent)
-                .append(current.name())
-                .append(": ")
-                .append(current.stringifiedValue().orElse(""))
-                .append("\n");
 
-        writer.append(printer.lineSeparator());
+        // Print Node
+        if(current.value().isEmpty()) return;
+        Object value = current.value().orElseThrow();
+        Class<?> clazz = value.getClass();
+
+        if(current.name() != null) writer.append(indent).append(current.name()).append(": ");
+
+        if(Primitives.isPrimitive(clazz) || value instanceof String) {
+            writer.append(current.stringifiedValue().orElse("")).append("\n");
+            writer.append(printer.lineSeparator());
+        }
+        if(Serializable.class.isAssignableFrom(clazz)) {
+            List<Field> fields = Arrays.stream(clazz.getFields()).filter(f -> !Modifier.isStatic(f.getModifiers())).toList();
+
+            YAMLNode extraNode = new YAMLNode(null, null);
+            boolean hasEntries = false;
+            for (Field f : fields) {
+                f.setAccessible(true);
+                if(f.get(value) == null) {
+                    f.setAccessible(false);
+                    continue;
+                }
+                String name = FieldAssigner.convertFieldNameToYAMLKey(f);
+                extraNode.setGetChild(name, new YAMLNode(name, f.get(value), null));
+                hasEntries = true;
+                f.setAccessible(false);
+            }
+            if(!hasEntries) {
+                writer.append("{}\n");
+                writer.append(printer.lineSeparator());
+                return;
+            }
+            if(current.name() != null) writer.append("\n");
+            nodeToString(writer, extraNode, level + 1, printer);
+
+            writer.append(printer.lineSeparator());
+        }
+        if(Collection.class.isAssignableFrom(clazz)) {
+            if(((Collection<?>) value).isEmpty()) {
+                writer.append("[]\n");
+                writer.append(printer.lineSeparator());
+                return;
+            }
+
+            writer.append("\n");
+            for (Object e : (Collection<?>) value) {
+                if(Primitives.isPrimitive(e.getClass())) {
+                    writer.append("\n");
+                    writer.append(indent).append(Strings.repeat(" ", printer.indentSpaces())).append("- ").append(e.toString());
+                } else if(e instanceof String) {
+                    writer.append("\n");
+                    writer.append(indent).append(Strings.repeat(" ", printer.indentSpaces())).append("- \"").append(String.valueOf(e)).append("\"");
+                } else if(e instanceof Serializable) {
+                    writer.append(indent).append(Strings.repeat(" ", printer.indentSpaces())).append("- ");
+                    String tempLineSeparator = printer.lineSeparator();
+                    printer.lineSeparator("");
+                    nodeToString(writer, new YAMLNode(null, e, null), level, printer);
+                    printer.lineSeparator(tempLineSeparator);
+                }
+                else continue;
+                writer.append("\n");
+            }
+            writer.append(printer.lineSeparator());
+        }
+        if(Map.class.isAssignableFrom(value.getClass())) {
+            if(((Map<?,?>) value).isEmpty()) {
+                writer.append("{}\n");
+                writer.append(printer.lineSeparator());
+                return;
+            }
+
+            YAMLNode tempNode = new YAMLNode(null, null);
+            ((Map<?, ?>) value).forEach((k, v)->{
+                Class<?> valueClass = v.getClass();
+
+                if(!(k instanceof String key))
+                    throw new RuntimeException("Declarative YAML requires that maps conform to one of the supported types: ["+FieldAssigner.supportedMaps+"]");
+                if(!(Primitives.isPrimitive(clazz) || String.class.isAssignableFrom(valueClass) || Serializable.class.isAssignableFrom(valueClass)))
+                    throw new RuntimeException("Declarative YAML requires that maps conform to one of the supported types: ["+FieldAssigner.supportedMaps+"]");
+
+                tempNode.setGetChild(FieldAssigner.convertFieldNameToYAMLKey(key), new YAMLNode(FieldAssigner.convertFieldNameToYAMLKey(key), v, null));
+            });
+
+            if(current.name() != null) writer.append("\n");
+            nodeToString(writer, tempNode, level + 1, printer);
+        }
     }
 }
 
