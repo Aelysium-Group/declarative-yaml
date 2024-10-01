@@ -1,5 +1,6 @@
 package group.aelysium.declarative_yaml;
 
+import group.aelysium.declarative_yaml.annotations.Node;
 import group.aelysium.declarative_yaml.lib.Primitives;
 import group.aelysium.declarative_yaml.lib.Serializable;
 import org.jetbrains.annotations.Nullable;
@@ -51,13 +52,14 @@ class FieldAssigner {
 
     private static Object serializeObject(CommentedConfigurationNode objectRoot, Class<?> clazz) throws Exception {
         try {
-            List<Field> fields = Arrays.stream(clazz.getFields()).filter(field -> Modifier.isFinal(field.getModifiers())).toList();
+            List<Field> fields = Arrays.stream(clazz.getFields()).filter(f -> Modifier.isFinal(f.getModifiers()) && f.isAnnotationPresent(Node.class)).toList();
             clazz.getConstructor().setAccessible(true);
             Object instance = clazz.getConstructor().newInstance();
             clazz.getConstructor().setAccessible(false);
 
             for (Field f : fields) {
                 boolean isOptional = f.isAnnotationPresent(Nullable.class);
+
                 f.setAccessible(true);
 
                 try {

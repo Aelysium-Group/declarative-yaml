@@ -22,7 +22,7 @@ public @interface Node {
      * The key to read.
      * You can climb up the yaml hierarchy by separating your keys with periods.
      * If you leave this empty, the key will be parsed from the class field's name.
-     * In order to successfully use the class field name as the YAML key.
+     * In order to successfully use the class field name as the YAML key;
      * Make sure you format the name using a blend of camelCase (node names) and snakeCase (node nesting):<br/>
      * <code>nodeOne_nodeTwo_nodeThree</code><br/>
      * Will be parsed into:<br/>
@@ -33,6 +33,7 @@ public @interface Node {
      *     node-two:
      *          node-three:
      * </code></pre>
+     * <br/><br/>
      */
     String key() default "";
 }

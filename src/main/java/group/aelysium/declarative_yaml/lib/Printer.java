@@ -8,7 +8,7 @@ import java.util.Map;
 public class Printer {
     protected int indentSpaces = 4;
     private boolean indentComments = true;
-    private String lineSeparator = "\n\n\n";
+    private String lineSeparator = "\n";
     private boolean injecting = false;
     private Map<String, String> pathReplacements = new HashMap<>(0);
     private Map<String, String> commentReplacements = new HashMap<>(0);
