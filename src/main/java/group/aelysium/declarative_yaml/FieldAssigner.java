@@ -94,7 +94,7 @@ class FieldAssigner {
         List<Object> list = new ArrayList<>();
         for (CommentedConfigurationNode entry : node.childrenList())
             list.add(serialize(entry, entryClass, entryType));
-        return list;
+        return Collections.unmodifiableList(list);
     }
     private static Set<Object> serializeSet(CommentedConfigurationNode node, Class<?> clazz, ParameterizedType type) throws Exception {
         Type entryType = type.getActualTypeArguments()[0];
@@ -106,7 +106,7 @@ class FieldAssigner {
         Set<Object> set = new HashSet<>();
         for (CommentedConfigurationNode entry : node.childrenList())
             set.add(serialize(entry, entryClass, entryType));
-        return set;
+        return Collections.unmodifiableSet(set);
     }
     private static Map<String, ?> serializeMap(CommentedConfigurationNode node, Class<?> clazz, ParameterizedType type) throws Exception {
         Type keyType = type.getActualTypeArguments()[0];
@@ -127,7 +127,7 @@ class FieldAssigner {
             map.put(key, serialize(entry.getValue(), valueClass, valueType));
         }
 
-        return map;
+        return Collections.unmodifiableMap(map);
     }
 
     public static String convertFieldNameToYAMLKey(String name) {
