@@ -59,23 +59,22 @@ public class DeclarativeYAML {
      * To replace a target, you can define its name inside the commentReplacements parameter on {@link Printer}.
      * @param clazz The class definition of the config.
      * @param printer The printer configuration to use.
-     * @throws IOException If the config filepath contains invalid characters.
-     * @throws ArrayIndexOutOfBoundsException If you don't provide the same number of pathReplacements as {path_parameters} in the @Config path.
      */
-    public static <T> T load(@NotNull Class<T> clazz, @NotNull Printer printer) throws IOException, ArrayIndexOutOfBoundsException {
-        printer.injecting(clazz.isAnnotationPresent(Inject.class));
-
-        if(!(clazz.isAnnotationPresent(Config.class) || !printer.injecting()))
-            throw new RuntimeException("Config class declarations must be annotated with either @Config or @Inject.");
-
-        String configPath;
-        {
-            if(printer.injecting()) configPath = clazz.getAnnotation(Inject.class).value();
-            else configPath = clazz.getAnnotation(Config.class).value();
-        }
-
-        String path = parsePath(configPath, printer);
+    public static <T> T load(@NotNull Class<T> clazz, @NotNull Printer printer) throws RuntimeException {
         try {
+            printer.injecting(clazz.isAnnotationPresent(Inject.class));
+
+            if(!(clazz.isAnnotationPresent(Config.class) || !printer.injecting()))
+                throw new RuntimeException("Config class declarations must be annotated with either @Config or @Inject.");
+
+            String configPath;
+            {
+                if(printer.injecting()) configPath = clazz.getAnnotation(Inject.class).value();
+                else configPath = clazz.getAnnotation(Config.class).value();
+            }
+
+            String path = parsePath(configPath, printer);
+
             T instance = clazz.getConstructor().newInstance();
 
             pathParameters(clazz, instance, printer);
@@ -98,8 +97,84 @@ public class DeclarativeYAML {
         }
     }
 
-    public static <T> T load(@NotNull Class<T> clazz) throws IOException, ArrayIndexOutOfBoundsException {
+    public static <T> T load(@NotNull Class<T> clazz) throws RuntimeException {
         return load(clazz, new Printer());
+    }
+
+    public static void reload(@NotNull Object instance, @NotNull Printer printer) throws RuntimeException {
+        try {
+            printer.injecting(instance.getClass().isAnnotationPresent(Inject.class));
+
+            if(!(instance.getClass().isAnnotationPresent(Config.class) || !printer.injecting()))
+                throw new RuntimeException("Config class declarations must be annotated with either @Config or @Inject.");
+
+            String configPath;
+            {
+                if(printer.injecting()) configPath = instance.getClass().getAnnotation(Inject.class).value();
+                else configPath = instance.getClass().getAnnotation(Config.class).value();
+            }
+
+            String path = parsePath(configPath, printer);
+
+            pathParameters(instance.getClass(), instance, printer);
+
+            List<ConfigTarget> targets = generateConfigTargets(instance.getClass(), instance, printer);
+            YAMLNode nodeTree = convertConfigTargetsToYAMLNodes(instance.getClass(), targets);
+
+            CommentedConfigurationNode yaml = loadOrGenerateFile(path, nodeTree, printer);
+
+            handleAllContents(instance.getClass(), instance, path);
+            for (ConfigTarget target : targets) {
+                if(target.field() == null) continue;
+                target.field().setAccessible(true);
+                target.field().set(instance, getValueFromYAML(yaml, target));
+                target.field().setAccessible(false);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void reload(@NotNull Object instance) throws RuntimeException {
+        reload(instance, new Printer());
+    }
+
+    public static void update(@NotNull Object instance, @NotNull Printer printer) throws RuntimeException {
+        try {
+            printer.injecting(instance.getClass().isAnnotationPresent(Inject.class));
+
+            if(!(instance.getClass().isAnnotationPresent(Config.class) || !printer.injecting()))
+                throw new RuntimeException("Config class declarations must be annotated with either @Config or @Inject.");
+
+            String configPath;
+            {
+                if(printer.injecting()) configPath = instance.getClass().getAnnotation(Inject.class).value();
+                else configPath = instance.getClass().getAnnotation(Config.class).value();
+            }
+
+            String path = parsePath(configPath, printer);
+
+            pathParameters(instance.getClass(), instance, printer);
+
+            List<ConfigTarget> targets = generateConfigTargets(instance.getClass(), instance, printer);
+            YAMLNode nodeTree = convertConfigTargetsToYAMLNodes(instance.getClass(), targets);
+
+            CommentedConfigurationNode yaml = loadOrGenerateFile(path, nodeTree, printer);
+
+            handleAllContents(instance.getClass(), instance, path);
+            for (ConfigTarget target : targets) {
+                if(target.field() == null) continue;
+                target.field().setAccessible(true);
+                target.field().set(instance, getValueFromYAML(yaml, target));
+                target.field().setAccessible(false);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void update(@NotNull Object instance) throws RuntimeException {
+        update(instance, new Printer());
     }
 
     private static List<ConfigTarget> generateConfigTargets(@NotNull Class<?> clazz, @NotNull Object instance, Printer printer) {
