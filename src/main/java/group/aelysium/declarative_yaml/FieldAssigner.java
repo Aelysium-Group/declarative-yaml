@@ -13,7 +13,9 @@ class FieldAssigner {
     public static final String supportedMaps = String.join(", ", List.of(
             "Map<String, Primitive>",
             "Map<String, String>",
-            "Map<String, Serializable>"
+            "Map<String, Serializable>",
+            "Map<String, Enum>",
+            "Map<String, Record>"
     ));
     public static final String supportedTypes = String.join(", ", List.of(
             "Primitive",
@@ -24,9 +26,13 @@ class FieldAssigner {
             "List<Primitive>",
             "List<String>",
             "List<Serializable",
+            "List<Enum>",
+            "List<Record>",
             "Set<Primitive>",
             "Set<String>",
             "Set<Serializable>",
+            "Set<Enum>",
+            "Set<Record>",
             supportedMaps
     ));
 
