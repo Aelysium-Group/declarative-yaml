@@ -10,12 +10,4 @@ They just have awkward formatting and weird whitespace at times.
 ## Getting started
 Check out our [docs](https://wiki.aelysium.group/declarative-yaml/)!
 
-```gradle
-maven {
-    url "https://maven.mrnavastar.me/releases"
-}
-
-implementation "group.aelysium:declarative-yaml:0.1.4"
-```
-
 2024 © [Aelysium](https://aelysium.group)
