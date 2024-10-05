@@ -20,6 +20,7 @@ class FieldAssigner {
             "String",
             "Serializable",
             "Enums",
+            "Java Records",
             "List<Primitive>",
             "List<String>",
             "List<Serializable",
