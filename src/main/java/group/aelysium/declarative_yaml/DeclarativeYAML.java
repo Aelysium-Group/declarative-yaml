@@ -335,6 +335,7 @@ class YAMLPrinter {
             writer.append(current.stringifiedValue().orElse("")).append("\n");
             writer.append(printer.lineSeparator());
         }
+
         if(Serializable.class.isAssignableFrom(clazz)) {
             List<Field> fields = Arrays.stream(clazz.getFields()).filter(f -> !Modifier.isStatic(f.getModifiers())).toList();
 
@@ -361,6 +362,12 @@ class YAMLPrinter {
 
             writer.append(printer.lineSeparator());
         }
+
+        if (clazz.isEnum()) {
+            writer.append(value.toString());
+            writer.append(printer.lineSeparator());
+        }
+
         if(Collection.class.isAssignableFrom(clazz)) {
             if(((Collection<?>) value).isEmpty()) {
                 writer.append("[]\n");
@@ -388,6 +395,7 @@ class YAMLPrinter {
             }
             writer.append(printer.lineSeparator());
         }
+
         if(Map.class.isAssignableFrom(value.getClass())) {
             if(((Map<?,?>) value).isEmpty()) {
                 writer.append("{}\n");

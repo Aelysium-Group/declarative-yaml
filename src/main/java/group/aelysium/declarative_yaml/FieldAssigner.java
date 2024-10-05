@@ -19,6 +19,7 @@ class FieldAssigner {
             "Primitive",
             "String",
             "Serializable",
+            "Enums",
             "List<Primitive>",
             "List<String>",
             "List<Serializable",
@@ -32,6 +33,10 @@ class FieldAssigner {
         if(Primitives.isPrimitive(clazz)) return FieldAssigner.serializePrimitive(node, clazz);
         if(String.class.isAssignableFrom(clazz)) return FieldAssigner.serializeString(node);
         if(Serializable.class.isAssignableFrom(clazz)) return FieldAssigner.serializeObject(node, clazz);
+        if (clazz.isEnum()) {
+            @SuppressWarnings("unchecked") final var enumType = (Class<? extends Enum<?>>) clazz;
+            return FieldAssigner.serializeEnum(node, enumType);
+        }
 
         if(!(type instanceof ParameterizedType parameterizedType))
             throw new RuntimeException(clazz.getSimpleName()+" is not a type that's supported by Declarative YAML. Supported types are: "+supportedTypes);
@@ -84,6 +89,22 @@ class FieldAssigner {
             throw new Exception(e);
         }
     }
+
+    private static Object serializeEnum(CommentedConfigurationNode node, Class<?extends Enum<?>> clazz) {
+        String value = node.getString();
+
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Enum value is missing for " + clazz.getSimpleName());
+        }
+
+        try {
+            return Enum.valueOf(clazz.asSubclass(Enum.class), value.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid enum value '" + value + "' for enum " + clazz.getSimpleName() + ". Supported values are: " +
+                    Arrays.toString(clazz.getEnumConstants()), e);
+        }
+    }
+
     private static List<Object> serializeList(CommentedConfigurationNode node, Class<?> clazz, ParameterizedType type) throws Exception {
         Type entryType = type.getActualTypeArguments()[0];
         Class<?> entryClass = (Class<?>) type.getActualTypeArguments()[0];
