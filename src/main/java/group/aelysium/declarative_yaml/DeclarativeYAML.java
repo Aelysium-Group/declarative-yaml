@@ -57,7 +57,8 @@ public class DeclarativeYAML {
      * When adding comments using the {@link Comment} annotation, you can define targets as {some_key} which will be replaced when the config is generated.
      * <pre><code>{@code "This is an example comment with an inserted value that says: {say_something_here}" }</code></pre>
      * To replace a target, you can define its name inside the commentReplacements parameter on {@link Printer}.
-     * @param clazz The class definition of the config.
+     *
+     * @param clazz   The class definition of the config.
      * @param printer The printer configuration to use.
      */
     public static <T> T load(@NotNull Class<T> clazz, @NotNull Printer printer) throws RuntimeException {
@@ -86,7 +87,7 @@ public class DeclarativeYAML {
 
             handleAllContents(clazz, instance, path);
             for (ConfigTarget target : targets) {
-                if(target.field() == null) continue;
+                if (target.field() == null) continue;
                 target.field().setAccessible(true);
                 target.field().set(instance, getValueFromYAML(yaml, target));
                 target.field().setAccessible(false);
@@ -184,31 +185,33 @@ public class DeclarativeYAML {
                 .forEach(f -> {
                     boolean hasComment = f.isAnnotationPresent(Comment.class);
                     boolean hasEntry = f.isAnnotationPresent(Node.class);
-                    if(!(hasComment || hasEntry)) return;
+                    if (!(hasComment || hasEntry)) return;
 
                     Node node = f.getAnnotation(Node.class);
 
                     List<String> comment = null;
-                    if(hasComment) {
+                    if (hasComment) {
                         Comment c = f.getAnnotation(Comment.class);
                         comment = new ArrayList<>();
                         for (String s : c.value()) {
                             AtomicReference<String> correctedString = new AtomicReference<>(s);
-                            printer.commentReplacements().forEach((k, v) -> correctedString.set(correctedString.get().replace("{"+k+"}", v)));
+                            printer.commentReplacements().forEach((k, v) -> correctedString.set(correctedString.get().replace("{" + k + "}", v)));
                             comment.add(correctedString.get());
                         }
                     }
 
                     String key = node.key();
-                    if(key.isEmpty()) key = FieldAssigner.convertFieldNameToYAMLKey(f);
+                    if (key.isEmpty()) key = FieldAssigner.convertFieldNameToYAMLKey(f);
 
                     Object defaultValue = null;
                     try {
                         f.setAccessible(true);
                         defaultValue = f.get(instance);
                         f.setAccessible(false);
-                    } catch (Exception ignore) {}
-                    if(defaultValue == null) throw new NullPointerException("You must define a default value on fields annotated with @Node. Issue was caused by "+ f.getName());
+                    } catch (Exception ignore) {
+                    }
+                    if (defaultValue == null)
+                        throw new NullPointerException("You must define a default value on fields annotated with @Node. Issue was caused by " + f.getName());
                     targets.add(new ConfigTarget(node.value(), key, defaultValue, f, comment));
                 });
 
@@ -241,10 +244,10 @@ public class DeclarativeYAML {
                 YAMLNode newCurrent = currentNode.get().setGetChild(
                         key,
                         lastKey ? new YAMLNode(key, parsingTarget.value(), parsingTarget.comment())
-                        : new YAMLNode(key, null)
+                                : new YAMLNode(key, null)
                 );
-                if(Set.class.isAssignableFrom(parsingTarget.value().getClass())) newCurrent.isArray(true);
-                if(List.class.isAssignableFrom(parsingTarget.value().getClass())) newCurrent.isArray(true);
+                if (Set.class.isAssignableFrom(parsingTarget.value().getClass())) newCurrent.isArray(true);
+                if (List.class.isAssignableFrom(parsingTarget.value().getClass())) newCurrent.isArray(true);
 
                 currentNode.set(newCurrent);
             }
@@ -257,7 +260,7 @@ public class DeclarativeYAML {
         Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> !Modifier.isStatic(f.getModifiers())).toList()
                 .forEach(f -> {
-                    if(!f.isAnnotationPresent(PathParameter.class)) return;
+                    if (!f.isAnnotationPresent(PathParameter.class)) return;
 
                     PathParameter pathParameter = f.getAnnotation(PathParameter.class);
                     try {
@@ -277,10 +280,11 @@ public class DeclarativeYAML {
         Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> !Modifier.isStatic(f.getModifiers())).toList()
                 .forEach(f -> {
-                    if(!f.isAnnotationPresent(AllContents.class)) return;
+                    if (!f.isAnnotationPresent(AllContents.class)) return;
 
                     try {
-                        if (!f.getType().equals(byte[].class)) throw new ClassCastException("Fields annotated with @AllContents must be of type byte[]!");
+                        if (!f.getType().equals(byte[].class))
+                            throw new ClassCastException("Fields annotated with @AllContents must be of type byte[]!");
 
                         f.setAccessible(true);
                         f.set(instance, allContents);
@@ -293,6 +297,7 @@ public class DeclarativeYAML {
 
     /**
      * Retrieve data from a specific configuration node.
+     *
      * @param target The target to search for.
      * @return Data with a type matching `type`
      * @throws IllegalStateException If there was an issue while retrieving the data or converting it to `type`.
@@ -318,19 +323,20 @@ public class DeclarativeYAML {
 
         try {
             if (!configPointer.exists()) {
-                if(printer.injecting()) throw new IOException("Attempted to inject into a config that doesn't exist! "+path);
+                if (printer.injecting())
+                    throw new IOException("Attempted to inject into a config that doesn't exist! " + path);
 
                 File parent = configPointer.getParentFile();
-                if(parent != null) if (!parent.exists()) parent.mkdirs();
+                if (parent != null) if (!parent.exists()) parent.mkdirs();
                 configPointer.createNewFile();
 
-                try(FileWriter writer = new FileWriter(configPointer)) {
+                try (FileWriter writer = new FileWriter(configPointer)) {
                     YAMLPrinter.deserialize(writer, nodeTree, printer);
                 }
             }
 
-            if(printer.injecting()) {
-                try(FileWriter writer = new FileWriter(configPointer)) {
+            if (printer.injecting()) {
+                try (FileWriter writer = new FileWriter(configPointer)) {
                     YAMLPrinter.deserialize(writer, nodeTree, printer);
                 }
             }
@@ -349,18 +355,19 @@ public class DeclarativeYAML {
         {
             AtomicInteger index = new AtomicInteger(0);
             List<String> splitPath = Arrays.stream(originalPath.split("/")).map(v -> {
-                if(!v.startsWith("{")) return v;
-                String key = v.replaceAll("^.*\\{([a-zA-Z0-9\\_\\-\\.\\/\\\\]+)\\}.*","$1");
+                if (!v.startsWith("{")) return v;
+                String key = v.replaceAll("^.*\\{([a-zA-Z0-9\\_\\-\\.\\/\\\\]+)\\}.*", "$1");
 
                 String replacement = printer.pathReplacements().get(key);
-                if(replacement == null) throw new IllegalArgumentException("No value for the path key '"+key+"' exists!");
+                if (replacement == null)
+                    throw new IllegalArgumentException("No value for the path key '" + key + "' exists!");
                 index.incrementAndGet();
-                return v.replaceAll("^\\{[a-zA-Z0-9\\_\\-\\.\\/\\\\]+\\}(\\.[a-zA-Z0-9\\_\\-]*)?",replacement+"$1");
+                return v.replaceAll("^\\{[a-zA-Z0-9\\_\\-\\.\\/\\\\]+\\}(\\.[a-zA-Z0-9\\_\\-]*)?", replacement + "$1");
             }).toList();
             path = String.join("/", splitPath);
         }
-        if(!Pattern.compile("^[a-zA-Z0-9\\_\\-\\.\\/\\\\]+$").matcher(path).matches())
-            throw new IOException("Invalid file path defined for config: "+path);
+        if (!Pattern.compile("^[a-zA-Z0-9\\_\\-\\.\\/\\\\]+$").matcher(path).matches())
+            throw new IOException("Invalid file path defined for config: " + path);
 
         return path;
     }
@@ -376,7 +383,7 @@ class YAMLPrinter {
 
         // Climb hierarchy
         if (current.children().isPresent()) {
-            if(current.name() == null) {
+            if (current.name() == null) {
                 for (YAMLNode node : current.children().orElseThrow())
                     nodeToString(writer, node, level, printer);
                 return;
@@ -393,31 +400,32 @@ class YAMLPrinter {
             if (printer.indentComments()) writer.append(indent);
 
             // Add comment hashtag if one wasn't given.
-            if(!s.startsWith("#")) writer.append("# ");
+            if (!s.startsWith("#")) writer.append("# ");
 
             writer.append(s);
             writer.append("\n");
         }
 
         // Print Node
-        if(current.value().isEmpty()) return;
+        if (current.value().isEmpty()) return;
         Object value = current.value().orElseThrow();
         Class<?> clazz = value.getClass();
 
-        if(current.name() != null) writer.append(indent).append(current.name()).append(": ");
+        if (current.name() != null) writer.append(indent).append(current.name()).append(": ");
 
-        if(Primitives.isPrimitive(clazz) || value instanceof String) {
+        if (Primitives.isPrimitive(clazz) || value instanceof String) {
             writer.append(current.stringifiedValue().orElse("")).append("\n");
             writer.append(printer.lineSeparator());
         }
-        if(Serializable.class.isAssignableFrom(clazz)) {
+
+        if (Serializable.class.isAssignableFrom(clazz)) {
             List<Field> fields = Arrays.stream(clazz.getFields()).filter(f -> !Modifier.isStatic(f.getModifiers())).toList();
 
             YAMLNode extraNode = new YAMLNode(null, null);
             boolean hasEntries = false;
             for (Field f : fields) {
                 f.setAccessible(true);
-                if(f.get(value) == null) {
+                if (f.get(value) == null) {
                     f.setAccessible(false);
                     continue;
                 }
@@ -426,18 +434,64 @@ class YAMLPrinter {
                 hasEntries = true;
                 f.setAccessible(false);
             }
-            if(!hasEntries) {
+            if (!hasEntries) {
                 writer.append("{}\n");
                 writer.append(printer.lineSeparator());
                 return;
             }
-            if(current.name() != null) writer.append("\n");
+            if (current.name() != null) writer.append("\n");
             nodeToString(writer, extraNode, level + 1, printer);
 
             writer.append(printer.lineSeparator());
         }
-        if(Collection.class.isAssignableFrom(clazz)) {
-            if(((Collection<?>) value).isEmpty()) {
+
+        if (clazz.isEnum()) {
+            writer.append(value.toString());
+            writer.append(printer.lineSeparator());
+        }
+
+        if (Record.class.isAssignableFrom(clazz)) {
+            List<RecordComponent> components = Arrays.stream(clazz.getRecordComponents()).toList();
+            YAMLNode extraNode = new YAMLNode(null, null);
+            boolean hasEntries = false;
+            for (RecordComponent component : components) {
+                Method accessor = component.getAccessor();
+                Object componentValue = accessor.invoke(value);
+                if (componentValue == null) {
+                    continue;
+                }
+
+                List<String> comment = null;
+                boolean hasComment = component.isAnnotationPresent(Comment.class);
+                if (hasComment) {
+                    Comment c = component.getAnnotation(Comment.class);
+                    comment = new ArrayList<>();
+                    for (String s : c.value()) {
+                        AtomicReference<String> correctedString = new AtomicReference<>(s);
+                        printer.commentReplacements().forEach((k, v) -> correctedString.set(correctedString.get().replace("{" + k + "}", v)));
+                        comment.add(correctedString.get());
+                    }
+                }
+
+                String name = FieldAssigner.convertFieldNameToYAMLKey(component.getName());
+                extraNode.setGetChild(name, new YAMLNode(name, componentValue, comment));
+                hasEntries = true;
+            }
+
+            if (!hasEntries) {
+                writer.append("{}\n");
+                writer.append(printer.lineSeparator());
+                return;
+            }
+
+            if (current.name() != null) writer.append("\n");
+            nodeToString(writer, extraNode, level + 1, printer);
+
+            writer.append(printer.lineSeparator());
+        }
+
+        if (Collection.class.isAssignableFrom(clazz)) {
+            if (((Collection<?>) value).isEmpty()) {
                 writer.append("[]\n");
                 writer.append(printer.lineSeparator());
                 return;
@@ -445,44 +499,44 @@ class YAMLPrinter {
 
             writer.append("\n");
             for (Object e : (Collection<?>) value) {
-                if(Primitives.isPrimitive(e.getClass())) {
+                if (Primitives.isPrimitive(e.getClass())) {
                     writer.append("\n");
                     writer.append(indent).append(Strings.repeat(" ", printer.indentSpaces())).append("- ").append(e.toString());
-                } else if(e instanceof String) {
+                } else if (e instanceof String) {
                     writer.append("\n");
                     writer.append(indent).append(Strings.repeat(" ", printer.indentSpaces())).append("- \"").append(String.valueOf(e)).append("\"");
-                } else if(e instanceof Serializable) {
+                } else if (e instanceof Serializable) {
                     writer.append(indent).append(Strings.repeat(" ", printer.indentSpaces())).append("- ");
                     String tempLineSeparator = printer.lineSeparator();
                     printer.lineSeparator("");
                     nodeToString(writer, new YAMLNode(null, e, null), level, printer);
                     printer.lineSeparator(tempLineSeparator);
-                }
-                else continue;
+                } else continue;
                 writer.append("\n");
             }
             writer.append(printer.lineSeparator());
         }
-        if(Map.class.isAssignableFrom(value.getClass())) {
-            if(((Map<?,?>) value).isEmpty()) {
+
+        if (Map.class.isAssignableFrom(value.getClass())) {
+            if (((Map<?, ?>) value).isEmpty()) {
                 writer.append("{}\n");
                 writer.append(printer.lineSeparator());
                 return;
             }
 
             YAMLNode tempNode = new YAMLNode(null, null);
-            ((Map<?, ?>) value).forEach((k, v)->{
+            ((Map<?, ?>) value).forEach((k, v) -> {
                 Class<?> valueClass = v.getClass();
 
-                if(!(k instanceof String key))
-                    throw new RuntimeException("Declarative YAML requires that maps conform to one of the supported types: ["+FieldAssigner.supportedMaps+"]");
-                if(!(Primitives.isPrimitive(clazz) || String.class.isAssignableFrom(valueClass) || Serializable.class.isAssignableFrom(valueClass)))
-                    throw new RuntimeException("Declarative YAML requires that maps conform to one of the supported types: ["+FieldAssigner.supportedMaps+"]");
+                if (!(k instanceof String key))
+                    throw new RuntimeException("Declarative YAML requires that maps conform to one of the supported types: [" + FieldAssigner.supportedMaps + "]");
+                if (!(Primitives.isPrimitive(clazz) || String.class.isAssignableFrom(valueClass) || Serializable.class.isAssignableFrom(valueClass)))
+                    throw new RuntimeException("Declarative YAML requires that maps conform to one of the supported types: [" + FieldAssigner.supportedMaps + "]");
 
                 tempNode.setGetChild(FieldAssigner.convertFieldNameToYAMLKey(key), new YAMLNode(FieldAssigner.convertFieldNameToYAMLKey(key), v, null));
             });
 
-            if(current.name() != null) writer.append("\n");
+            if (current.name() != null) writer.append("\n");
             nodeToString(writer, tempNode, level + 1, printer);
         }
     }

@@ -10,7 +10,7 @@ import java.lang.annotation.Target;
  * Comments only work if they're added to an already existing {@link Node}.
  */
 @Retention(RetentionPolicy.RUNTIME)
-@Target({ ElementType.FIELD, ElementType.TYPE })
+@Target({ElementType.FIELD, ElementType.TYPE, ElementType.RECORD_COMPONENT})
 public @interface Comment {
     /**
      * The comment to show.
