@@ -9,7 +9,7 @@ import org.spongepowered.configurate.CommentedConfigurationNode;
 import java.lang.reflect.*;
 import java.util.*;
 
-class FieldAssigner {
+class Deserializer {
     public static final String supportedMaps = String.join(", ", List.of(
             "Map<String, Primitive>",
             "Map<String, String>",
@@ -36,25 +36,25 @@ class FieldAssigner {
             supportedMaps
     ));
 
-    public static Object serialize(CommentedConfigurationNode node, Class<?> clazz, Type type) throws Exception {
-        if (Primitives.isPrimitive(clazz)) return FieldAssigner.serializePrimitive(node, clazz);
-        if (String.class.isAssignableFrom(clazz)) return FieldAssigner.serializeString(node);
-        if (Serializable.class.isAssignableFrom(clazz)) return FieldAssigner.serializeObject(node, clazz);
+    public static Object deserialize(CommentedConfigurationNode node, Class<?> clazz, Type type) throws Exception {
+        if (Primitives.isPrimitive(clazz)) return Deserializer.serializePrimitive(node, clazz);
+        if (String.class.isAssignableFrom(clazz)) return Deserializer.serializeString(node);
+        if (Serializable.class.isAssignableFrom(clazz)) return Deserializer.serializeObject(node, clazz);
         if (clazz.isEnum()) {
             @SuppressWarnings("unchecked") final var enumType = (Class<? extends Enum<?>>) clazz;
-            return FieldAssigner.serializeEnum(node, enumType);
+            return Deserializer.serializeEnum(node, enumType);
         }
-        if (Record.class.isAssignableFrom(clazz)) return FieldAssigner.serializeRecord(node, clazz);
+        if (Record.class.isAssignableFrom(clazz)) return Deserializer.serializeRecord(node, clazz);
 
         if (!(type instanceof ParameterizedType parameterizedType))
             throw new RuntimeException(clazz.getSimpleName() + " is not a type that's supported by Declarative YAML. Supported types are: " + supportedTypes);
 
         if (List.class.isAssignableFrom(clazz) && node.isList())
-            return FieldAssigner.serializeList(node, clazz, parameterizedType);
+            return Deserializer.serializeList(node, clazz, parameterizedType);
         if (Set.class.isAssignableFrom(clazz) && node.isList())
-            return FieldAssigner.serializeSet(node, clazz, parameterizedType);
+            return Deserializer.serializeSet(node, clazz, parameterizedType);
         if (Map.class.isAssignableFrom(clazz) && node.isMap())
-            return FieldAssigner.serializeMap(node, clazz, parameterizedType);
+            return Deserializer.serializeMap(node, clazz, parameterizedType);
 
         throw new RuntimeException(clazz.getSimpleName() + " is not a type that's supported by Declarative YAML. Supported types are: " + supportedTypes);
     }
@@ -82,8 +82,8 @@ class FieldAssigner {
 
                 try {
                     String key = convertFieldNameToYAMLKey(f);
-                    CommentedConfigurationNode node = DeclarativeYAML.getNodeFromYAML(objectRoot, key);
-                    f.set(instance, serialize(node, f.getType(), f.getGenericType()));
+                    CommentedConfigurationNode node = InjectionPhase.getNodeFromYAML(objectRoot, key);
+                    f.set(instance, deserialize(node, f.getType(), f.getGenericType()));
                 } catch (Exception e) {
                     if (isOptional) {
                         f.set(instance, null);
@@ -123,9 +123,9 @@ class FieldAssigner {
         Map<String, Object> values = new HashMap<>();
 
         for (RecordComponent component : components) {
-            String key = FieldAssigner.convertFieldNameToYAMLKey(component.getName());
+            String key = Deserializer.convertFieldNameToYAMLKey(component.getName());
             CommentedConfigurationNode componentNode = node.node(key);
-            values.put(component.getName(), FieldAssigner.serialize(componentNode, component.getType(), component.getGenericType()));
+            values.put(component.getName(), Deserializer.deserialize(componentNode, component.getType(), component.getGenericType()));
         }
 
         Object[] valuesArray = Arrays.stream(components)
@@ -151,7 +151,7 @@ class FieldAssigner {
 
         List<Object> list = new ArrayList<>();
         for (CommentedConfigurationNode entry : node.childrenList())
-            list.add(serialize(entry, entryClass, entryType));
+            list.add(deserialize(entry, entryClass, entryType));
         return Collections.unmodifiableList(list);
     }
 
@@ -164,7 +164,7 @@ class FieldAssigner {
 
         Set<Object> set = new HashSet<>();
         for (CommentedConfigurationNode entry : node.childrenList())
-            set.add(serialize(entry, entryClass, entryType));
+            set.add(deserialize(entry, entryClass, entryType));
         return Collections.unmodifiableSet(set);
     }
 
@@ -185,7 +185,7 @@ class FieldAssigner {
             if (!(entry.getKey() instanceof String key))
                 throw new IllegalArgumentException("Declarative YAML requires that maps loaded from YAML must be of the type [" + supportedMaps + "].");
 
-            map.put(key, serialize(entry.getValue(), valueClass, valueType));
+            map.put(key, deserialize(entry.getValue(), valueClass, valueType));
         }
 
         return Collections.unmodifiableMap(map);

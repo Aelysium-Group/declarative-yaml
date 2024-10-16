@@ -9,7 +9,6 @@ public class Printer {
     protected int indentSpaces = 4;
     private boolean indentComments = true;
     private String lineSeparator = "\n";
-    private boolean injecting = false;
     private Map<String, String> pathReplacements = new HashMap<>(0);
     private Map<String, String> commentReplacements = new HashMap<>(0);
     public Printer() {}
@@ -51,14 +50,6 @@ public class Printer {
     }
     public Printer commentReplacements(Map<String, String> commentReplacements) {
         this.commentReplacements = commentReplacements;
-        return this;
-    }
-
-    public boolean injecting() {
-        return this.injecting;
-    }
-    public Printer injecting(boolean injecting) {
-        this.injecting = injecting;
         return this;
     }
 }
