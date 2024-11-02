@@ -50,17 +50,20 @@ public class Serializer {
 
         // Print Node
         if (current.value().isEmpty()) return;
+
         Object value = current.value().orElseThrow();
         Class<?> clazz = value.getClass();
 
         if (current.name() != null) writer.append(indent).append(current.name()).append(": ");
 
         if (Primitives.isPrimitive(clazz) || value instanceof String) {
+
             writer.append(current.stringifiedValue().orElse("")).append("\n");
             writer.append(printer.lineSeparator());
         }
 
         if (Serializable.class.isAssignableFrom(clazz)) {
+
             List<Field> fields = Arrays.stream(clazz.getFields()).filter(f -> !Modifier.isStatic(f.getModifiers())).toList();
 
             YAMLNode extraNode = new YAMLNode(null, null);
@@ -88,11 +91,13 @@ public class Serializer {
         }
 
         if (clazz.isEnum()) {
+
             writer.append(value.toString());
             writer.append(printer.lineSeparator());
         }
 
         if (Record.class.isAssignableFrom(clazz)) {
+
             List<RecordComponent> components = Arrays.stream(clazz.getRecordComponents()).toList();
             YAMLNode extraNode = new YAMLNode(null, null);
             boolean hasEntries = false;
@@ -133,6 +138,7 @@ public class Serializer {
         }
 
         if (Collection.class.isAssignableFrom(clazz)) {
+
             if (((Collection<?>) value).isEmpty()) {
                 writer.append("[]\n");
                 writer.append(printer.lineSeparator());
@@ -160,6 +166,7 @@ public class Serializer {
         }
 
         if (Map.class.isAssignableFrom(value.getClass())) {
+
             if (((Map<?, ?>) value).isEmpty()) {
                 writer.append("{}\n");
                 writer.append(printer.lineSeparator());

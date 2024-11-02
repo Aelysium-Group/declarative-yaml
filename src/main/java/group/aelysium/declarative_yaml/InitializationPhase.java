@@ -6,34 +6,28 @@ import group.aelysium.declarative_yaml.lib.YAMLNode;
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Handles the loading of the config class members in preparation for (de)serialization.
  */
 class InitializationPhase {
-    public static YAMLNode nodesFromClass(Object instance, Printer printer) throws Exception {
-        List<ConfigTarget> targets = generateConfigTargets(instance.getClass(), printer);
+    public static YAMLNode nodesFromClass(Object instance, Printer printer) {
+        List<ConfigTarget> targets = generateConfigTargets(instance, printer);
         return convertConfigTargetsToYAMLNodes(instance.getClass(), targets);
     }
 
     public static List<ConfigTarget> generateConfigTargets(@NotNull Object instance, Printer printer) {
-        List<ConfigTarget> targets = new ArrayList<>();
+        List<ConfigTarget> targets = new Vector<>();
         Arrays.stream(instance.getClass().getDeclaredFields())
                 .filter(f -> !Modifier.isStatic(f.getModifiers())).toList()
                 .forEach(f -> {
-                    boolean hasComment = f.isAnnotationPresent(Comment.class);
-                    boolean hasEntry = f.isAnnotationPresent(Node.class);
-                    if (!(hasComment || hasEntry)) return;
-
+                    if(!f.isAnnotationPresent(Node.class)) return;
                     Node node = f.getAnnotation(Node.class);
 
                     List<String> comment = null;
-                    if (hasComment) {
+                    if (f.isAnnotationPresent(Comment.class)) {
                         Comment c = f.getAnnotation(Comment.class);
                         comment = new ArrayList<>();
                         for (String s : c.value()) {
@@ -51,10 +45,10 @@ class InitializationPhase {
                         f.setAccessible(true);
                         defaultValue = f.get(instance);
                         f.setAccessible(false);
-                    } catch (Exception ignore) {
-                    }
-                    if (defaultValue == null)
-                        throw new NullPointerException("You must define a default value on fields annotated with @Node. Issue was caused by " + f.getName());
+                    } catch (Exception e) { e.printStackTrace(); }
+
+                    if (defaultValue == null) throw new NullPointerException("You must define a default value on fields annotated with @Node. Issue was caused by " + f.getName());
+
                     targets.add(new ConfigTarget(node.value(), key, defaultValue, f, comment));
                 });
 
@@ -80,6 +74,7 @@ class InitializationPhase {
         for (ConfigTarget parsingTarget : targets) {
             String[] keys = parsingTarget.key().split("\\.");
             AtomicReference<YAMLNode> currentNode = new AtomicReference<>(root);
+
             for (int i = 0; i < keys.length; i++) {
                 String key = keys[i];
                 boolean lastKey = i == keys.length - 1;

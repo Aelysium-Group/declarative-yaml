@@ -22,7 +22,8 @@ class InjectionPhase {
 
         handleAllContents(instance, LoadingPhase.resolveFile(instance, printer));
         for (ConfigTarget target : InitializationPhase.generateConfigTargets(instance, printer)) {
-            if (target.field() == null) continue;
+            if(target.field() == null) continue;
+
             target.field().setAccessible(true);
             target.field().set(instance, getValueFromYAML(yaml, target));
             target.field().setAccessible(false);

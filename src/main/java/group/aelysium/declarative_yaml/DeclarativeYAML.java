@@ -2,6 +2,7 @@ package group.aelysium.declarative_yaml;
 
 import group.aelysium.declarative_yaml.annotations.*;
 import group.aelysium.declarative_yaml.lib.*;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.spongepowered.configurate.CommentedConfigurationNode;
 
@@ -51,20 +52,20 @@ public class DeclarativeYAML {
 
     /**
      * Reloads the specified instance from the config file.
-     * This file does not print or store any data from the clas onto the file system, it only reads.<br/>
+     * This file does not print or store any data from the class onto the file system, it only reads.<br/>
      * To be safe, you should really only ever pass instances that were give to you via the {@link DeclarativeYAML#load(Class, Printer)} method.<br/>
      * For details on how to properly set up a config declaration, check out the wiki.<br/>
      * <a href="https://wiki.aelysium.group/declarative-yaml/">Aelysium Wiki | Declarative YAML</a>
      * @param instance The config instance to reload values into.
      * @param printer The configuration to use during the loading.
      */
+    @Contract(mutates = "param1")
     public static void reload(@NotNull Object instance, @NotNull Printer printer) {
         try {
             if(!instance.getClass().isAnnotationPresent(Config.class))
                 throw new RuntimeException("Config class declarations must be annotated with @Config.");
 
-            YAMLNode node = InitializationPhase.nodesFromClass(instance, printer);
-            CommentedConfigurationNode yaml = LoadingPhase.reloadYAMLFile(instance, printer, node);
+            CommentedConfigurationNode yaml = LoadingPhase.reloadYAMLFile(instance, printer);
             InjectionPhase.injectConfigValueIntoClass(instance, printer, yaml);
         } catch (Exception e) {
             throw new RuntimeException(e);

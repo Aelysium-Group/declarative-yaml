@@ -11,7 +11,6 @@ import org.spongepowered.configurate.yaml.YamlConfigurationLoader;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
@@ -25,7 +24,7 @@ class LoadingPhase {
         if(!file.exists()) generateFile(file, tree, printer);
         return loadFile(file);
     }
-    public static CommentedConfigurationNode reloadYAMLFile(Object instance, Printer printer, YAMLNode tree) throws Exception {
+    public static CommentedConfigurationNode reloadYAMLFile(Object instance, Printer printer) throws Exception {
         File file = resolveFile(instance, printer);
 
         return loadFile(file);

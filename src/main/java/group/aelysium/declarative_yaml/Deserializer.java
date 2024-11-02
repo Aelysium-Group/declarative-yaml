@@ -3,10 +3,12 @@ package group.aelysium.declarative_yaml;
 import group.aelysium.declarative_yaml.annotations.Node;
 import group.aelysium.declarative_yaml.lib.Primitives;
 import group.aelysium.declarative_yaml.lib.Serializable;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.configurate.CommentedConfigurationNode;
 
 import java.lang.reflect.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 class Deserializer {
@@ -36,7 +38,7 @@ class Deserializer {
             supportedMaps
     ));
 
-    public static Object deserialize(CommentedConfigurationNode node, Class<?> clazz, Type type) throws Exception {
+    public static @NotNull Object deserialize(CommentedConfigurationNode node, Class<?> clazz, Type type) throws Exception {
         if (Primitives.isPrimitive(clazz)) return Deserializer.serializePrimitive(node, clazz);
         if (String.class.isAssignableFrom(clazz)) return Deserializer.serializeString(node);
         if (Serializable.class.isAssignableFrom(clazz)) return Deserializer.serializeObject(node, clazz);
@@ -49,18 +51,23 @@ class Deserializer {
         if (!(type instanceof ParameterizedType parameterizedType))
             throw new RuntimeException(clazz.getSimpleName() + " is not a type that's supported by Declarative YAML. Supported types are: " + supportedTypes);
 
-        if (List.class.isAssignableFrom(clazz) && node.isList())
+        if (List.class.isAssignableFrom(clazz))
             return Deserializer.serializeList(node, clazz, parameterizedType);
-        if (Set.class.isAssignableFrom(clazz) && node.isList())
+        if (Set.class.isAssignableFrom(clazz))
             return Deserializer.serializeSet(node, clazz, parameterizedType);
-        if (Map.class.isAssignableFrom(clazz) && node.isMap())
+        if (Map.class.isAssignableFrom(clazz))
             return Deserializer.serializeMap(node, clazz, parameterizedType);
 
         throw new RuntimeException(clazz.getSimpleName() + " is not a type that's supported by Declarative YAML. Supported types are: " + supportedTypes);
     }
 
 
-    private static <T> T serializePrimitive(CommentedConfigurationNode node, Class<T> clazz) throws Exception {
+    private static Object serializePrimitive(CommentedConfigurationNode node, Class<?> clazz) throws Exception {
+        if(clazz.isAssignableFrom(boolean.class)) return node.getBoolean();
+        if(clazz.isAssignableFrom(int.class)) return node.getInt();
+        if(clazz.isAssignableFrom(long.class)) return node.getLong();
+        if(clazz.isAssignableFrom(float.class)) return node.getFloat();
+        if(clazz.isAssignableFrom(double.class)) return node.getDouble();
         return node.get(clazz);
     }
 
