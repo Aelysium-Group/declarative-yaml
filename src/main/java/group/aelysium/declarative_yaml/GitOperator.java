@@ -57,7 +57,7 @@ public class GitOperator {
         this.sync();
         this.liveConfigs.forEach(c -> {
             try {
-                DeclarativeYAML.reload(c.instance(), c.printer());
+                DeclarativeYAML.ReadOnly(c.instance(), c.printer());
             } catch (Exception e) {
                 if(c.onFail() == null) return;
                 c.onFail().accept(e);

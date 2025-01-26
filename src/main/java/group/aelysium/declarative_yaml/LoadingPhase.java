@@ -1,7 +1,7 @@
 package group.aelysium.declarative_yaml;
 
 import group.aelysium.declarative_yaml.annotations.Config;
-import group.aelysium.declarative_yaml.annotations.Git;
+import group.aelysium.declarative_yaml.annotations.Namespace;
 import group.aelysium.declarative_yaml.lib.Printer;
 import group.aelysium.declarative_yaml.lib.YAMLNode;
 import org.jetbrains.annotations.NotNull;
@@ -37,15 +37,17 @@ class LoadingPhase {
 
     public static File resolveFile(Object instance, Printer printer) throws Exception {
         String configPath = instance.getClass().getAnnotation(Config.class).value();
+        String namespace = "";
+        try {
+            namespace = instance.getClass().getAnnotation(Namespace.class).value();
+        } catch(Exception ignore) {}
 
-        File file = new File(parsePath(configPath, printer));
-        if(instance.getClass().isAnnotationPresent(Git.class)) {
-            Git annotation = instance.getClass().getAnnotation(Git.class);
-            GitOperator git = DeclarativeYAML.fetchRepository(annotation.value()).orElse(null);
-            if(git == null)
-                if(annotation.required()) throw new IllegalStateException(annotation.value()+" was called before it was registered. Git repositories must be registered using DynamicYAML.registerRepository.");
-                else return file;
+        String basePath = "";
+        if(!namespace.isBlank()) basePath = DeclarativeYAML.basePath(namespace);
 
+        File file = new File(basePath + parsePath(configPath, printer));
+        if(DeclarativeYAML.fetchRepository(namespace).isPresent()) {
+            GitOperator git = DeclarativeYAML.fetchRepository(namespace).orElseThrow();
             git.sync();
             file = git.fetch(Path.of(configPath));
         }
